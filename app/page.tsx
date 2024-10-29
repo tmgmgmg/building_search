@@ -1,101 +1,169 @@
-import Image from "next/image";
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import mapboxgl from "mapbox-gl";
+import MapboxLanguage from "@mapbox/mapbox-gl-language";
+import "mapbox-gl/dist/mapbox-gl.css";
+import { Button } from "@/components/ui/button";
+import { Layers } from "lucide-react";
+import { Building, getBuildings } from "@/lib/microcms";
+import SearchSidebar from "@/components/SearchSidebar";
+import BuildingDetails from "@/components/BuildingDetails";
+
+mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN || "";
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-8 row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-semibold">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li>Save and see your changes instantly.</li>
-        </ol>
+  const mapContainer = useRef<HTMLDivElement>(null);
+  const [map, setMap] = useState<mapboxgl.Map | null>(null);
+  const [view, setView] = useState("2D");
+  const [buildings, setBuildings] = useState<Building[]>([]);
+  const [selectedBuilding, setSelectedBuilding] = useState<Building | null>(
+    null
+  );
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:min-w-44"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  useEffect(() => {
+    if (mapContainer.current === null) return;
+
+    const initializeMap = async () => {
+      const newMap = new mapboxgl.Map({
+        container: mapContainer.current!,
+        style: "mapbox://styles/mapbox/light-v11",
+        center: [139.7670516, 35.6811673],
+        zoom: 15,
+        pitch: 0,
+        bearing: 0,
+      });
+
+      newMap.on("style.load", () => {
+        const language = new MapboxLanguage({ defaultLanguage: "ja" });
+        newMap.addControl(language);
+      });
+
+      newMap.on("load", async () => {
+        setMap(newMap);
+        newMap.resize();
+
+        // 建築物データを取得
+        const buildingsData = await getBuildings();
+        setBuildings(buildingsData);
+
+        // マーカーを追加
+        buildingsData.forEach((building) => {
+          const popup = new mapboxgl.Popup({ offset: 25 }).setHTML(`
+            <div role="dialog" aria-label="${building.name}の詳細情報">
+              <h3>${building.name}</h3>
+              <p>建築家: ${building.architect}</p>
+            </div>
+          `);
+
+          const el = document.createElement("div");
+          el.className = "marker";
+          el.style.backgroundImage = "url(https://placekitten.com/g/40/40)";
+          el.style.width = "40px";
+          el.style.height = "40px";
+          el.style.backgroundSize = "100%";
+          el.style.borderRadius = "50%";
+          el.style.border = "2px solid #fff";
+
+          new mapboxgl.Marker(el)
+            .setLngLat([building.longitude, building.latitude])
+            .setPopup(popup)
+            .addTo(newMap);
+        });
+      });
+    };
+
+    initializeMap();
+
+    return () => {
+      setMap((prevMap) => {
+        if (prevMap) prevMap.remove();
+        return null;
+      });
+    };
+  }, []);
+
+  const toggleView = () => {
+    if (map) {
+      if (view === "2D") {
+        map.easeTo({ pitch: 45, bearing: -17.6, zoom: 15.5 });
+        setView("3D");
+        map.addLayer({
+          id: "3d-buildings",
+          source: "composite",
+          "source-layer": "building",
+          filter: ["==", "extrude", "true"],
+          type: "fill-extrusion",
+          minzoom: 15,
+          paint: {
+            "fill-extrusion-color": "#aaa",
+            "fill-extrusion-height": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              15,
+              0,
+              15.05,
+              ["get", "height"],
+            ],
+            "fill-extrusion-base": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              15,
+              0,
+              15.05,
+              ["get", "min_height"],
+            ],
+            "fill-extrusion-opacity": 0.6,
+          },
+        });
+      } else {
+        map.easeTo({ pitch: 0, bearing: 0, zoom: 15 });
+        setView("2D");
+        map.removeLayer("3d-buildings");
+      }
+    }
+  };
+
+  const flyToBuilding = (building: Building) => {
+    if (map) {
+      map.flyTo({
+        center: [building.longitude, building.latitude],
+        zoom: 17,
+        essential: true,
+      });
+      setSelectedBuilding(building);
+    }
+  };
+
+  return (
+    <main className="flex flex-col h-screen">
+      <header className="flex justify-between items-center p-4 bg-background border-b">
+        <h1 className="text-2xl font-bold">建築物地図サービス</h1>
+        <Button variant="outline">ログイン</Button>
+      </header>
+      <div className="flex flex-1 overflow-hidden">
+        <SearchSidebar buildings={buildings} onBuildingClick={flyToBuilding} />
+        <div className="flex-1 relative">
+          <div
+            ref={mapContainer}
+            className="absolute inset-0"
+            style={{ width: "100%", height: "100%" }}
+          />
+          <div className="absolute top-4 right-4 space-x-2">
+            <Button onClick={toggleView}>
+              <Layers className="mr-2 h-4 w-4" /> {view}表示
+            </Button>
+          </div>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-6 flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
+        {selectedBuilding && (
+          <BuildingDetails
+            building={selectedBuilding}
+            onClose={() => setSelectedBuilding(null)}
           />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
+        )}
+      </div>
+    </main>
   );
 }
